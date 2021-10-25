@@ -36,6 +36,9 @@ class SecurityGroupBasicRegressionTests1(BaseSGTest, VerifySecGroup, ConfigPolic
             7. Test with ping, which should fail
             8. Test with TCP which should pass
             9. Update the rules to allow icmp, ping should pass now.
+            10. Update the SG ingress rule to allow only TCP, and keeping egress to allow ICMP
+            11. Test with ping, which should fail
+            12. Check the flow table, there should not be any Hold flow created (Refer: CEM-22323)
         """
         secgrp_name = get_random_name('test_sec_group')
         (prefix, prefix_len) = get_random_cidrs(self.inputs.get_af())[0].split('/')
@@ -183,3 +186,36 @@ class SecurityGroupBasicRegressionTests1(BaseSGTest, VerifySecGroup, ConfigPolic
         #Ping should pass now
         assert vm1_fixture.ping_with_certainty(ip=vm2_fixture.vm_ip,
             expectation=True)
+
+        # Adding below validation in order to cover the HOLD flow scenario(CEM-22323)
+        # delete all the flows from both the compute nodes
+        vm1_compute_fix = self.compute_fixtures_dict[vm1_fixture.vm_node_ip]
+        vm2_compute_fix = self.compute_fixtures_dict[vm2_fixture.vm_node_ip]
+        vm1_compute_fix.delete_all_flows()
+        vm2_compute_fix.delete_all_flows()
+
+        # updating ingress rule to allow only tcp, in order to check ping is blocked
+        rule[1]['protocol'] = 'tcp'
+        sg_fixture.replace_rules(rule)
+        assert vm1_fixture.ping_with_certainty(ip=vm2_fixture.vm_ip,
+            expectation=False)
+        cmd1 = 'contrail-tools flow --match {}'.format(vm1_fixture.vm_ip)
+        cmd2 = 'contrail-tools flow --match {}'.format(vm2_fixture.vm_ip)
+        matching_flow_src_node = vm1_compute_fix.execute_cmd(cmd1, container=None)
+        msg1 = "was expecting Forward but received different action:"
+        msg2 = "Refer the flow: {}".format(matching_flow_src_node)
+        assert 'Action:F' in matching_flow_src_node, msg1+msg2
+
+        assert 'Action:H' not in matching_flow_src_node, "Hold flow was not expected but " \
+                                                         "got created"
+
+        matching_flow_dst_node = vm2_compute_fix.execute_cmd(cmd2, container=None)
+        msg3 = "was expecting Action as Drop but received different action:"
+        msg4 = "Refer the flow: {}".format(matching_flow_dst_node)
+        cond1 = 'Action:D(SG)' in matching_flow_dst_node
+        cond2 = 'Action:D(Unknown)' in matching_flow_dst_node
+        assert (cond1 and cond2), msg3+msg4
+
+        assert 'Action:H' not in matching_flow_dst_node, "Hold flow was not expected but " \
+                                                         "got created"
+
