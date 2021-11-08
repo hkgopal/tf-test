@@ -26,7 +26,7 @@ class SecurityGroupBasicRegressionTests1(BaseSGTest, VerifySecGroup, ConfigPolic
     @preposttest_wrapper
     def test_sec_group_basic(self):
         """
-        Description: Test basic SG features
+        Description: Test basic SG features(temp)
             1. Security group create and delete
             2. Create security group with custom rules and then update it for tcp
             3. Launch VM with custom created security group and verify
